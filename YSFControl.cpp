@@ -142,7 +142,8 @@ bool CYSFControl::writeModem(unsigned char *data, unsigned int len)
 
 		// Convert the raw RSSI to dBm
 		int rssi = m_rssiMapper->interpolate(raw);
-		LogDebug("YSF, raw RSSI: %u, reported RSSI: %d dBm", raw, rssi);
+		if (rssi != 0)
+			LogDebug("YSF, raw RSSI: %u, reported RSSI: %d dBm", raw, rssi);
 
 		// RSSI is always reported as positive
 		m_rssi = (rssi >= 0) ? rssi : -rssi;
@@ -1092,7 +1093,7 @@ void CYSFControl::writeNetwork()
 
 		if (m_remoteGateway) {
 			fich.setVoIP(false);
-			fich.setMR(YSF_MR_NOT_BUSY);
+			fich.setMR(YSF_MR_DIRECT);
 		} else {
 			fich.setVoIP(true);
 			fich.setMR(YSF_MR_BUSY);

@@ -23,13 +23,13 @@
 #include "Defines.h"
 #include "SerialPort.h"
 #include "Timer.h"
-
+#include "Thread.h"
 #include <string>
 
 class CNextion : public CDisplay
 {
 public:
-  CNextion(const std::string& callsign, unsigned int dmrid, ISerialPort* serial, unsigned int brightness, bool displayClock, bool utc, unsigned int idleBrightness, unsigned int screenLayout);
+  CNextion(const std::string& callsign, unsigned int dmrid, ISerialPort* serial, unsigned int brightness, bool displayClock, bool utc, unsigned int idleBrightness, unsigned int screenLayout, unsigned int txFrequency, unsigned int rxFrequency, bool displayTempInF, const std::string& location);
   virtual ~CNextion();
 
   virtual bool open();
@@ -40,6 +40,7 @@ protected:
   virtual void setIdleInt();
   virtual void setErrorInt(const char* text);
   virtual void setLockoutInt();
+  virtual void setQuitInt();
 
   virtual void writeDStarInt(const char* my1, const char* my2, const char* your, const char* type, const char* reflector);
   virtual void writeDStarRSSIInt(unsigned char rssi);
@@ -68,6 +69,9 @@ protected:
   virtual void writeNXDNBERInt(float ber);
   virtual void clearNXDNInt();
 
+  virtual void writePOCSAGInt(uint32_t ric, const std::string& message);
+  virtual void clearPOCSAGInt();
+
   virtual void writeCWInt();
   virtual void clearCWInt();
 
@@ -93,7 +97,13 @@ private:
   unsigned int  m_rssiCount2;
   unsigned int  m_berCount1;
   unsigned int  m_berCount2;
-
+  unsigned int  m_txFrequency;
+  unsigned int  m_rxFrequency;
+  float         m_fl_txFrequency;
+  float         m_fl_rxFrequency;
+  bool          m_displayTempInF;
+  std::string   m_location;
+  
   void sendCommand(const char* command);
   void sendCommandAction(unsigned int status);
 };

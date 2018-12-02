@@ -38,7 +38,7 @@ const unsigned int P25_BER_COUNT    = 7U;		  // 7 * 180ms = 1260ms
 const unsigned int NXDN_RSSI_COUNT  = 28U;		  // 28 * 40ms = 1120ms
 const unsigned int NXDN_BER_COUNT   = 28U;		  // 28 * 40ms = 1120ms
 
-CNextion::CNextion(const std::string& callsign, unsigned int dmrid, ISerialPort* serial, unsigned int brightness, bool displayClock, bool utc, unsigned int idleBrightness, unsigned int screenLayout) :
+CNextion::CNextion(const std::string& callsign, unsigned int dmrid, ISerialPort* serial, unsigned int brightness, bool displayClock, bool utc, unsigned int idleBrightness, unsigned int screenLayout, unsigned int txFrequency, unsigned int rxFrequency, bool displayTempInF, const std::string& location) :
 CDisplay(),
 m_callsign(callsign),
 m_ipaddress("(ip unknown)"),
@@ -58,7 +58,13 @@ m_berAccum2(0.0F),
 m_rssiCount1(0U),
 m_rssiCount2(0U),
 m_berCount1(0U),
-m_berCount2(0U)
+m_berCount2(0U),
+m_txFrequency(txFrequency),
+m_rxFrequency(rxFrequency),
+m_fl_txFrequency(0.0F),
+m_fl_rxFrequency(0.0F),
+m_displayTempInF(displayTempInF),
+m_location(location)
 {
 	assert(serial != NULL);
 	assert(brightness >= 0U && brightness <= 100U);
@@ -80,14 +86,17 @@ bool CNextion::open()
 		return false;
 	}
 
-	info[0]=0;
+	info[0] = 0;
 	m_network = new CNetworkInfo;
 	m_network->getNetworkInterface(info);
 	m_ipaddress = (char*)info;
 
 	sendCommand("bkcmd=0");
-	sendCommandAction(0);
-
+	sendCommandAction(0U);
+	
+	m_fl_txFrequency = float(m_txFrequency) / 1000000.0F;
+	m_fl_rxFrequency = float(m_rxFrequency) / 1000000.0F;
+	
 	setIdle();
 
 	return true;
@@ -96,23 +105,62 @@ bool CNextion::open()
 
 void CNextion::setIdleInt()
 {
+	// a few bits borrowed from Lieven De Samblanx ON7LDS, NextionDriver
+	char command[100U];
+
 	sendCommand("page MMDVM");
 	sendCommandAction(1U);
 
-	char command[30U];
-	::sprintf(command, "dim=%u", m_idleBrightness);
-	sendCommand(command);
-	
+	if (m_brightness>0) {
+		::sprintf(command, "dim=%u", m_idleBrightness);
+		sendCommand(command);
+	}
+
 	::sprintf(command, "t0.txt=\"%s/%u\"", m_callsign.c_str(), m_dmrid);
 	sendCommand(command);
+
 	if (m_screenLayout > 2U) {
 		::sprintf(command, "t4.txt=\"%s\"", m_callsign.c_str());
 		sendCommand(command);
 		::sprintf(command, "t5.txt=\"%u\"", m_dmrid);
 		sendCommand(command);
-	}
-	sendCommandAction(17U);
+		sendCommandAction(17U);
 
+		::sprintf(command, "t30.txt=\"%3.4f\"",m_fl_rxFrequency);  // RX freq
+		sendCommand(command);
+		sendCommandAction(20U);
+		
+		::sprintf(command, "t32.txt=\"%3.4f\"",m_fl_txFrequency);  // TX freq
+		sendCommand(command);
+		sendCommandAction(21U);
+	
+		// CPU temperature
+		FILE* fp = ::fopen("/sys/class/thermal/thermal_zone0/temp", "rt");
+		if (fp != NULL) {
+			double val = 0.0;
+			int n = ::fscanf(fp, "%lf", &val);
+			::fclose(fp);
+
+			if (n == 1) {
+				val /= 1000.0;
+				if (m_displayTempInF) {
+					val = (1.8 * val) + 32.0;
+					::sprintf(command, "t20.txt=\"%2.1f %cF\"", val, 176);
+				} else {	
+					::sprintf(command, "t20.txt=\"%2.1f %cC\"", val, 176);
+				}
+				sendCommand(command);
+				sendCommandAction(22U);
+			}
+		}
+		
+		::sprintf(command, "t31.txt=\"%s\"", m_location.c_str());  // location
+		sendCommand(command);
+		sendCommandAction(23U);
+	} else {
+		sendCommandAction(17U);
+	}
+	
 	sendCommand("t1.txt=\"MMDVM IDLE\"");
 	sendCommandAction(11U);
 
@@ -133,8 +181,10 @@ void CNextion::setErrorInt(const char* text)
 	sendCommandAction(1U);
 
 	char command[20];
-	::sprintf(command, "dim=%u", m_brightness);
-	sendCommand(command);
+	if (m_brightness>0) {
+		::sprintf(command, "dim=%u", m_brightness);
+		sendCommand(command);
+	}
 
 	::sprintf(command, "t0.txt=\"%s\"", text);
 	sendCommandAction(13U);
@@ -154,8 +204,10 @@ void CNextion::setLockoutInt()
 	sendCommandAction(1U);
 
 	char command[20];
-	::sprintf(command, "dim=%u", m_brightness);
-	sendCommand(command);
+	if (m_brightness>0) {
+		::sprintf(command, "dim=%u", m_brightness);
+		sendCommand(command);
+	}
 
 	sendCommand("t0.txt=\"LOCKOUT\"");
 	sendCommandAction(15U);
@@ -163,6 +215,29 @@ void CNextion::setLockoutInt()
 	m_clockDisplayTimer.stop();
 
 	m_mode = MODE_LOCKOUT;
+}
+
+void CNextion::setQuitInt()
+{
+	sendCommand("page MMDVM");
+	sendCommandAction(1U);
+
+	char command[100];
+	if (m_brightness>0) {
+		::sprintf(command, "dim=%u", m_idleBrightness);
+		sendCommand(command);
+	}
+
+	::sprintf(command, "t3.txt=\"%s\"", m_ipaddress.c_str());
+	sendCommand(command);
+	sendCommandAction(16U);
+
+	sendCommand("t0.txt=\"MMDVM STOPPED\"");
+	sendCommandAction(19U);
+
+	m_clockDisplayTimer.stop();
+
+	m_mode = MODE_QUIT;
 }
 
 void CNextion::writeDStarInt(const char* my1, const char* my2, const char* your, const char* type, const char* reflector)
@@ -178,9 +253,11 @@ void CNextion::writeDStarInt(const char* my1, const char* my2, const char* your,
 		sendCommandAction(2U);
 	}
 
-	char text[30U];
-	::sprintf(text, "dim=%u", m_brightness);
-	sendCommand(text);
+	char text[50U];
+	if (m_brightness>0) {
+		::sprintf(text, "dim=%u", m_brightness);
+		sendCommand(text);
+	}
 
 	::sprintf(text, "t0.txt=\"%s %.8s/%4.4s\"", type, my1, my2);
 	sendCommand(text);
@@ -273,9 +350,11 @@ void CNextion::writeDMRInt(unsigned int slotNo, const std::string& src, bool gro
 		}
 	}
 
-	char text[30U];
-	::sprintf(text, "dim=%u", m_brightness);
-	sendCommand(text);
+	char text[50U];
+	if (m_brightness>0) {
+		::sprintf(text, "dim=%u", m_brightness);
+		sendCommand(text);
+	}
 
 	if (slotNo == 1U) {
 		::sprintf(text, "t0.txt=\"1 %s %s\"", type, src.c_str());
@@ -367,7 +446,7 @@ void CNextion::writeDMRTAInt(unsigned int slotNo, unsigned char* talkerAlias, co
 	}
 
 	if (slotNo == 1U) {
-		char text[40U];
+		char text[50U];
 		::sprintf(text, "t0.txt=\"1 %s %s\"", type, talkerAlias);
 
 		if (m_screenLayout == 2U) {
@@ -384,7 +463,7 @@ void CNextion::writeDMRTAInt(unsigned int slotNo, unsigned char* talkerAlias, co
 		sendCommand(text);
 		sendCommandAction(63U);
 	} else {
-		char text[40U];
+		char text[50U];
 		::sprintf(text, "t2.txt=\"2 %s %s\"", type, talkerAlias);
 
 		if (m_screenLayout == 2U) {
@@ -433,6 +512,7 @@ void CNextion::writeDMRBERInt(unsigned int slotNo, float ber)
 
 void CNextion::clearDMRInt(unsigned int slotNo)
 {
+	
 	if (slotNo == 1U) {
 		sendCommand("t0.txt=\"1 Listening\"");
 		sendCommandAction(61U);
@@ -474,8 +554,10 @@ void CNextion::writeFusionInt(const char* source, const char* dest, const char* 
 
 
 	char text[30U];
-	::sprintf(text, "dim=%u", m_brightness);
-	sendCommand(text);
+	if (m_brightness>0) {
+		::sprintf(text, "dim=%u", m_brightness);
+		sendCommand(text);
+	}
 
 	::sprintf(text, "t0.txt=\"%s %.10s\"", type, source);
 	sendCommand(text);
@@ -550,8 +632,10 @@ void CNextion::writeP25Int(const char* source, bool group, unsigned int dest, co
 	}
 
 	char text[30U];
-	::sprintf(text, "dim=%u", m_brightness);
-	sendCommand(text);
+	if (m_brightness>0) {
+		::sprintf(text, "dim=%u", m_brightness);
+		sendCommand(text);
+	}
 
 	::sprintf(text, "t0.txt=\"%s %.10s\"", type, source);
 	sendCommand(text);
@@ -616,20 +700,22 @@ void CNextion::writeNXDNInt(const char* source, bool group, unsigned int dest, c
 
 	if (m_mode != MODE_NXDN) {
 		sendCommand("page NXDN");
-		sendCommandAction(5U);
+		sendCommandAction(6U);
 	}
 
 	char text[30U];
-	::sprintf(text, "dim=%u", m_brightness);
-	sendCommand(text);
+	if (m_brightness>0) {
+		::sprintf(text, "dim=%u", m_brightness);
+		sendCommand(text);
+	}
 
 	::sprintf(text, "t0.txt=\"%s %.10s\"", type, source);
 	sendCommand(text);
-	sendCommandAction(102U);
+	sendCommandAction(122U);
 
 	::sprintf(text, "t1.txt=\"%s%u\"", group ? "TG" : "", dest);
 	sendCommand(text);
-	sendCommandAction(103U);
+	sendCommandAction(123U);
 
 	m_clockDisplayTimer.stop();
 
@@ -649,7 +735,7 @@ void CNextion::writeNXDNRSSIInt(unsigned char rssi)
 		char text[25U];
 		::sprintf(text, "t2.txt=\"-%udBm\"", m_rssiAccum1 / NXDN_RSSI_COUNT);
 		sendCommand(text);
-		sendCommandAction(104U);
+		sendCommandAction(124U);
 		m_rssiAccum1 = 0U;
 		m_rssiCount1 = 0U;
 	}
@@ -664,7 +750,7 @@ void CNextion::writeNXDNBERInt(float ber)
 		char text[25U];
 		::sprintf(text, "t3.txt=\"%.1f%%\"", m_berAccum1 / float(NXDN_BER_COUNT));
 		sendCommand(text);
-		sendCommandAction(105U);
+		sendCommandAction(125U);
 		m_berAccum1 = 0.0F;
 		m_berCount1 = 0U;
 	}
@@ -673,10 +759,43 @@ void CNextion::writeNXDNBERInt(float ber)
 void CNextion::clearNXDNInt()
 {
 	sendCommand("t0.txt=\"Listening\"");
-	sendCommandAction(101U);
+	sendCommandAction(121U);
 	sendCommand("t1.txt=\"\"");
 	sendCommand("t2.txt=\"\"");
 	sendCommand("t3.txt=\"\"");
+}
+
+void CNextion::writePOCSAGInt(uint32_t ric, const std::string& message)
+{
+	if (m_mode != MODE_POCSAG) {
+		sendCommand("page POCSAG");
+		sendCommandAction(7U);
+	}
+
+	char text[200U];
+	if (m_brightness>0) {
+		::sprintf(text, "dim=%u", m_brightness);
+		sendCommand(text);
+	}
+
+	::sprintf(text, "t0.txt=\"RIC: %u\"", ric);
+	sendCommand(text);
+	sendCommandAction(132U);
+
+	::sprintf(text, "t1.txt=\"%s\"", message.c_str());
+	sendCommand(text);
+	sendCommandAction(133U);
+
+	m_clockDisplayTimer.stop();
+
+	m_mode = MODE_POCSAG;
+}
+
+void CNextion::clearPOCSAGInt()
+{
+	sendCommand("t0.txt=\"Waiting\"");
+	sendCommandAction(134U);
+	sendCommand("t1.txt=\"\"");
 }
 
 void CNextion::writeCWInt()
@@ -719,17 +838,14 @@ void CNextion::clockInt(unsigned int ms)
 
 void CNextion::close()
 {
-	sendCommand("page MMDVM");
-	sendCommandAction(1U);
-	sendCommand("t1.txt=\"MMDVM STOPPED\"");
-	sendCommandAction(19U);
 	m_serial->close();
 	delete m_serial;
 }
 
 void CNextion::sendCommandAction(unsigned int status)
 {
-    if (m_screenLayout<3U) return;
+    if (m_screenLayout<3U)
+		return;
 
     char text[30U];
     ::sprintf(text, "MMDVM.status.val=%d", status);
@@ -737,11 +853,14 @@ void CNextion::sendCommandAction(unsigned int status)
     sendCommand("click S0,1");
 }
 
-
 void CNextion::sendCommand(const char* command)
 {
 	assert(command != NULL);
 
 	m_serial->write((unsigned char*)command, (unsigned int)::strlen(command));
 	m_serial->write((unsigned char*)"\xFF\xFF\xFF", 3U);
-}
+	// Since we just firing commands at the display, and not listening for the response,
+	// we must add a bit of a delay to allow the display to process the commands, else some are getting mangled.
+	// 10 ms is just a guess, but seems to be sufficient.
+    CThread::sleep(10U);
+	}

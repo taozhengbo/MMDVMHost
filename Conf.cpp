@@ -36,23 +36,27 @@ enum SECTION {
   SECTION_DMRID_LOOKUP,
   SECTION_NXDNID_LOOKUP,
   SECTION_MODEM,
+  SECTION_TRANSPARENT,
   SECTION_UMP,
   SECTION_DSTAR,
   SECTION_DMR,
   SECTION_FUSION,
   SECTION_P25,
   SECTION_NXDN,
+  SECTION_POCSAG,
   SECTION_DSTAR_NETWORK,
   SECTION_DMR_NETWORK,
   SECTION_FUSION_NETWORK,
   SECTION_P25_NETWORK,
   SECTION_NXDN_NETWORK,
+  SECTION_POCSAG_NETWORK,
   SECTION_TFTSERIAL,
   SECTION_HD44780,
   SECTION_NEXTION,
   SECTION_OLED,
   SECTION_LCDPROC,
-  SECTION_TGREWRITE
+  SECTION_LOCK_FILE,
+  SECTION_MOBILE_GPS
 };
 
 CConf::CConf(const std::string& file) :
@@ -84,6 +88,8 @@ m_dmrIdLookupTime(0U),
 m_nxdnIdLookupFile(),
 m_nxdnIdLookupTime(0U),
 m_modemPort(),
+m_modemProtocol("uart"),
+m_modemAddress(0x22),
 m_modemRXInvert(false),
 m_modemTXInvert(false),
 m_modemPTTInvert(false),
@@ -101,9 +107,15 @@ m_modemDMRTXLevel(50.0F),
 m_modemYSFTXLevel(50.0F),
 m_modemP25TXLevel(50.0F),
 m_modemNXDNTXLevel(50.0F),
+m_modemPOCSAGTXLevel(50.0F),
 m_modemRSSIMappingFile(),
 m_modemTrace(false),
 m_modemDebug(false),
+m_transparentEnabled(false),
+m_transparentRemoteAddress(),
+m_transparentRemotePort(0U),
+m_transparentLocalPort(0U),
+m_transparentSendFrameType(0U),
 m_umpEnabled(false),
 m_umpPort(),
 m_dstarEnabled(false),
@@ -112,6 +124,7 @@ m_dstarSelfOnly(false),
 m_dstarBlackList(),
 m_dstarAckReply(true),
 m_dstarAckTime(750U),
+m_dstarAckMessage(false),
 m_dstarErrorReply(true),
 m_dstarRemoteGateway(false),
 m_dstarModeHang(10U),
@@ -136,6 +149,7 @@ m_fusionEnabled(false),
 m_fusionLowDeviation(false),
 m_fusionRemoteGateway(false),
 m_fusionSelfOnly(false),
+m_fusionTXHang(4U),
 m_fusionSQLEnabled(false),
 m_fusionSQL(0U),
 m_fusionModeHang(10U),
@@ -152,6 +166,8 @@ m_nxdnRAN(1U),
 m_nxdnSelfOnly(false),
 m_nxdnRemoteGateway(false),
 m_nxdnModeHang(10U),
+m_pocsagEnabled(false),
+m_pocsagFrequency(0U),
 m_dstarNetworkEnabled(false),
 m_dstarGatewayAddress(),
 m_dstarGatewayPort(0U),
@@ -165,7 +181,7 @@ m_dmrNetworkLocal(0U),
 m_dmrNetworkPassword(),
 m_dmrNetworkOptions(),
 m_dmrNetworkDebug(false),
-m_dmrNetworkJitter(300U),
+m_dmrNetworkJitter(360U),
 m_dmrNetworkSlot1(true),
 m_dmrNetworkSlot2(true),
 m_dmrNetworkModeHang(3U),
@@ -183,12 +199,19 @@ m_p25LocalPort(0U),
 m_p25NetworkModeHang(3U),
 m_p25NetworkDebug(false),
 m_nxdnNetworkEnabled(false),
-m_nxdnNetworkMyAddress(),
-m_nxdnNetworkMyPort(0U),
-m_nxdnNetworkGatewayAddress(),
-m_nxdnNetworkGatewayPort(0U),
+m_nxdnGatewayAddress(),
+m_nxdnGatewayPort(0U),
+m_nxdnLocalAddress(),
+m_nxdnLocalPort(0U),
 m_nxdnNetworkModeHang(3U),
 m_nxdnNetworkDebug(false),
+m_pocsagNetworkEnabled(false),
+m_pocsagGatewayAddress(),
+m_pocsagGatewayPort(0U),
+m_pocsagLocalAddress(),
+m_pocsagLocalPort(0U),
+m_pocsagNetworkModeHang(3U),
+m_pocsagNetworkDebug(false),
 m_tftSerialPort("/dev/ttyAMA0"),
 m_tftSerialBrightness(50U),
 m_hd44780Rows(2U),
@@ -207,15 +230,23 @@ m_nextionDisplayClock(false),
 m_nextionUTC(false),
 m_nextionIdleBrightness(20U),
 m_nextionScreenLayout(0U),
+m_nextionTempInFahrenheit(false),
 m_oledType(3U),
 m_oledBrightness(0U),
 m_oledInvert(false),
 m_oledScroll(false),
+m_oledRotate(false),
+m_oledCast(false),
 m_lcdprocAddress(),
 m_lcdprocPort(0U),
 m_lcdprocLocalPort(0U),
 m_lcdprocDisplayClock(false),
-m_lcdprocUTC(false)
+m_lcdprocUTC(false),
+m_lockFileEnabled(false),
+m_lockFileName(),
+m_mobileGPSEnabled(false),
+m_mobileGPSAddress(),
+m_mobileGPSPort(0U)
 {
 }
 
@@ -253,6 +284,8 @@ bool CConf::read()
 		  section = SECTION_NXDNID_LOOKUP;
 	  else if (::strncmp(buffer, "[Modem]", 7U) == 0)
 		  section = SECTION_MODEM;
+	  else if (::strncmp(buffer, "[Transparent Data]", 18U) == 0)
+		  section = SECTION_TRANSPARENT;
 	  else if (::strncmp(buffer, "[UMP]", 5U) == 0)
 		  section = SECTION_UMP;
 	  else if (::strncmp(buffer, "[D-Star]", 8U) == 0)
@@ -265,6 +298,8 @@ bool CConf::read()
 		  section = SECTION_P25;
 	  else if (::strncmp(buffer, "[NXDN]", 6U) == 0)
 		  section = SECTION_NXDN;
+	  else if (::strncmp(buffer, "[POCSAG]", 8U) == 0)
+		  section = SECTION_POCSAG;
 	  else if (::strncmp(buffer, "[D-Star Network]", 16U) == 0)
 		  section = SECTION_DSTAR_NETWORK;
 	  else if (::strncmp(buffer, "[DMR Network]", 13U) == 0)
@@ -275,6 +310,8 @@ bool CConf::read()
 		  section = SECTION_P25_NETWORK;
 	  else if (::strncmp(buffer, "[NXDN Network]", 14U) == 0)
 		  section = SECTION_NXDN_NETWORK;
+	  else if (::strncmp(buffer, "[POCSAG Network]", 16U) == 0)
+		  section = SECTION_POCSAG_NETWORK;
 	  else if (::strncmp(buffer, "[TFT Serial]", 12U) == 0)
 		  section = SECTION_TFTSERIAL;
 	  else if (::strncmp(buffer, "[HD44780]", 9U) == 0)
@@ -285,6 +322,10 @@ bool CConf::read()
 		  section = SECTION_OLED;
 	  else if (::strncmp(buffer, "[LCDproc]", 9U) == 0)
 		  section = SECTION_LCDPROC;
+	  else if (::strncmp(buffer, "[Lock File]", 11U) == 0)
+		  section = SECTION_LOCK_FILE;
+	  else if (::strncmp(buffer, "[Mobile GPS]", 12U) == 0)
+		  section = SECTION_MOBILE_GPS;
 	  else
 		  section = SECTION_NONE;
 
@@ -331,7 +372,7 @@ bool CConf::read()
 			m_daemon = ::atoi(value) == 1;
 	} else if (section == SECTION_INFO) {
 		if (::strcmp(key, "TXFrequency") == 0)
-			m_txFrequency = (unsigned int)::atoi(value);
+			m_pocsagFrequency = m_txFrequency = (unsigned int)::atoi(value);
 		else if (::strcmp(key, "RXFrequency") == 0)
 			m_rxFrequency = (unsigned int)::atoi(value);
 		else if (::strcmp(key, "Power") == 0)
@@ -381,6 +422,10 @@ bool CConf::read()
 	} else if (section == SECTION_MODEM) {
 		if (::strcmp(key, "Port") == 0)
 			m_modemPort = value;
+        else if (::strcmp(key, "Protocol") == 0)
+            m_modemProtocol = value;
+        else if (::strcmp(key, "Address") == 0)
+            m_modemAddress = (unsigned int)::strtoul(value, NULL, 16);
 		else if (::strcmp(key, "RXInvert") == 0)
 			m_modemRXInvert = ::atoi(value) == 1;
 		else if (::strcmp(key, "TXInvert") == 0)
@@ -417,12 +462,25 @@ bool CConf::read()
 			m_modemP25TXLevel = float(::atof(value));
 		else if (::strcmp(key, "NXDNTXLevel") == 0)
 			m_modemNXDNTXLevel = float(::atof(value));
+		else if (::strcmp(key, "POCSAGTXLevel") == 0)
+			m_modemPOCSAGTXLevel = float(::atof(value));
 		else if (::strcmp(key, "RSSIMappingFile") == 0)
 			m_modemRSSIMappingFile = value;
 		else if (::strcmp(key, "Trace") == 0)
 			m_modemTrace = ::atoi(value) == 1;
 		else if (::strcmp(key, "Debug") == 0)
 			m_modemDebug = ::atoi(value) == 1;
+	} else if (section == SECTION_TRANSPARENT) {
+		if (::strcmp(key, "Enable") == 0)
+			m_transparentEnabled = ::atoi(value) == 1;
+		else if (::strcmp(key, "RemoteAddress") == 0)
+			m_transparentRemoteAddress = value;
+		else if (::strcmp(key, "RemotePort") == 0)
+			m_transparentRemotePort = (unsigned int)::atoi(value);
+		else if (::strcmp(key, "LocalPort") == 0)
+			m_transparentLocalPort = (unsigned int)::atoi(value);
+		else if (::strcmp(key, "SendFrameType") == 0)
+			m_transparentSendFrameType = (unsigned int)::atoi(value);
 	} else if (section == SECTION_UMP) {
 		if (::strcmp(key, "Enable") == 0)
 			m_umpEnabled = ::atoi(value) == 1;
@@ -454,6 +512,8 @@ bool CConf::read()
 			m_dstarAckReply = ::atoi(value) == 1;
 		else if (::strcmp(key, "AckTime") == 0)
 			m_dstarAckTime = (unsigned int)::atoi(value);
+		else if (::strcmp(key, "AckMessage") == 0)
+			m_dstarAckMessage = ::atoi(value) == 1;
 		else if (::strcmp(key, "ErrorReply") == 0)
 			m_dstarErrorReply = ::atoi(value) == 1;
 		else if (::strcmp(key, "RemoteGateway") == 0)
@@ -530,13 +590,15 @@ bool CConf::read()
 			m_fusionEnabled = ::atoi(value) == 1;
 		else if (::strcmp(key, "LowDeviation") == 0)
 			m_fusionLowDeviation = ::atoi(value) == 1;
-		else if (::strcmp(key, "DSQ") == 0) {
+		else if (::strcmp(key, "DSQ") == 0 || ::strcmp(key, "DGID") == 0) {
 			m_fusionSQLEnabled = true;
 			m_fusionSQL        = (unsigned int)::atoi(value);
 		} else if (::strcmp(key, "RemoteGateway") == 0)
 			m_fusionRemoteGateway = ::atoi(value) == 1;
 		else if (::strcmp(key, "SelfOnly") == 0)
 			m_fusionSelfOnly = ::atoi(value) == 1;
+		else if (::strcmp(key, "TXHang") == 0)
+			m_fusionTXHang = (unsigned int)::atoi(value);
 		else if (::strcmp(key, "ModeHang") == 0)
 			m_fusionModeHang = (unsigned int)::atoi(value);
 	} else if (section == SECTION_P25) {
@@ -567,6 +629,11 @@ bool CConf::read()
 			m_nxdnRemoteGateway = ::atoi(value) == 1;
 		else if (::strcmp(key, "ModeHang") == 0)
 			m_nxdnModeHang = (unsigned int)::atoi(value);
+	} else if (section == SECTION_POCSAG) {
+		if (::strcmp(key, "Enable") == 0)
+			m_pocsagEnabled = ::atoi(value) == 1;
+		else if (::strcmp(key, "Frequency") == 0)
+			m_pocsagFrequency = (unsigned int)::atoi(value);
 	} else if (section == SECTION_DSTAR_NETWORK) {
 		if (::strcmp(key, "Enable") == 0)
 			m_dstarNetworkEnabled = ::atoi(value) == 1;
@@ -635,17 +702,32 @@ bool CConf::read()
 		if (::strcmp(key, "Enable") == 0)
 			m_nxdnNetworkEnabled = ::atoi(value) == 1;
 		else if (::strcmp(key, "LocalAddress") == 0)
-			m_nxdnNetworkMyAddress = value;
+			m_nxdnLocalAddress = value;
 		else if (::strcmp(key, "LocalPort") == 0)
-			m_nxdnNetworkMyPort = (unsigned int)::atoi(value);
+			m_nxdnLocalPort = (unsigned int)::atoi(value);
 		else if (::strcmp(key, "GatewayAddress") == 0)
-			m_nxdnNetworkGatewayAddress = value;
+			m_nxdnGatewayAddress = value;
 		else if (::strcmp(key, "GatewayPort") == 0)
-			m_nxdnNetworkGatewayPort = (unsigned int)::atoi(value);
+			m_nxdnGatewayPort = (unsigned int)::atoi(value);
 		else if (::strcmp(key, "ModeHang") == 0)
 			m_nxdnNetworkModeHang = (unsigned int)::atoi(value);
 		else if (::strcmp(key, "Debug") == 0)
 			m_nxdnNetworkDebug = ::atoi(value) == 1;
+	} else if (section == SECTION_POCSAG_NETWORK) {
+		if (::strcmp(key, "Enable") == 0)
+			m_pocsagNetworkEnabled = ::atoi(value) == 1;
+		else if (::strcmp(key, "LocalAddress") == 0)
+			m_pocsagLocalAddress = value;
+		else if (::strcmp(key, "LocalPort") == 0)
+			m_pocsagLocalPort = (unsigned int)::atoi(value);
+		else if (::strcmp(key, "GatewayAddress") == 0)
+			m_pocsagGatewayAddress = value;
+		else if (::strcmp(key, "GatewayPort") == 0)
+			m_pocsagGatewayPort = (unsigned int)::atoi(value);
+		else if (::strcmp(key, "ModeHang") == 0)
+			m_pocsagNetworkModeHang = (unsigned int)::atoi(value);
+		else if (::strcmp(key, "Debug") == 0)
+			m_pocsagNetworkDebug = ::atoi(value) == 1;
 	} else if (section == SECTION_TFTSERIAL) {
 		if (::strcmp(key, "Port") == 0)
 			m_tftSerialPort = value;
@@ -691,6 +773,8 @@ bool CConf::read()
 			m_nextionIdleBrightness = (unsigned int)::atoi(value);
 		else if (::strcmp(key, "ScreenLayout") == 0)
 			m_nextionScreenLayout = (unsigned int)::atoi(value);
+		else if (::strcmp(key, "DisplayTempInFahrenheit") == 0)
+			m_nextionTempInFahrenheit = ::atoi(value) == 1;
 	} else if (section == SECTION_OLED) {
 		if (::strcmp(key, "Type") == 0)
 			m_oledType = (unsigned char)::atoi(value);
@@ -700,6 +784,10 @@ bool CConf::read()
 			m_oledInvert = ::atoi(value) == 1;
 		else if (::strcmp(key, "Scroll") == 0)
 			m_oledScroll = ::atoi(value) == 1;
+		else if (::strcmp(key, "Rotate") == 0)
+			m_oledRotate = ::atoi(value) == 1;
+		else if (::strcmp(key, "Cast") == 0)
+			m_oledCast = ::atoi(value) == 1;
 	} else if (section == SECTION_LCDPROC) {
 		if (::strcmp(key, "Address") == 0)
 			m_lcdprocAddress = value;
@@ -713,6 +801,18 @@ bool CConf::read()
 			m_lcdprocUTC = ::atoi(value) == 1;
 		else if (::strcmp(key, "DimOnIdle") == 0)
 			m_lcdprocDimOnIdle = ::atoi(value) == 1;
+	} else if (section == SECTION_LOCK_FILE) {
+		if (::strcmp(key, "Enable") == 0)
+			m_lockFileEnabled = ::atoi(value) == 1;
+		else if (::strcmp(key, "File") == 0)
+			m_lockFileName = value;
+	} else if (section == SECTION_MOBILE_GPS) {
+		if (::strcmp(key, "Enable") == 0)
+			m_mobileGPSEnabled = ::atoi(value) == 1;
+		else if (::strcmp(key, "Address") == 0)
+			m_mobileGPSAddress = value;
+		else if (::strcmp(key, "Port") == 0)
+			m_mobileGPSPort = (unsigned int)::atoi(value);
 	}
   }
 
@@ -856,6 +956,16 @@ std::string CConf::getModemPort() const
 	return m_modemPort;
 }
 
+std::string CConf::getModemProtocol() const
+{
+	return m_modemProtocol;
+}
+
+unsigned int CConf::getModemAddress() const
+{
+	return m_modemAddress;
+}
+
 bool CConf::getModemRXInvert() const
 {
 	return m_modemRXInvert;
@@ -941,6 +1051,11 @@ float CConf::getModemNXDNTXLevel() const
 	return m_modemNXDNTXLevel;
 }
 
+float CConf::getModemPOCSAGTXLevel() const
+{
+	return m_modemPOCSAGTXLevel;
+}
+
 std::string CConf::getModemRSSIMappingFile () const
 {
 	return m_modemRSSIMappingFile;
@@ -954,6 +1069,31 @@ bool CConf::getModemTrace() const
 bool CConf::getModemDebug() const
 {
 	return m_modemDebug;
+}
+
+bool CConf::getTransparentEnabled() const
+{
+	return m_transparentEnabled;
+}
+
+std::string CConf::getTransparentRemoteAddress() const
+{
+	return m_transparentRemoteAddress;
+}
+
+unsigned int CConf::getTransparentRemotePort() const
+{
+	return m_transparentRemotePort;
+}
+
+unsigned int CConf::getTransparentLocalPort() const
+{
+	return m_transparentLocalPort;
+}
+
+unsigned int CConf::getTransparentSendFrameType() const
+{
+	return m_transparentSendFrameType;
 }
 
 bool CConf::getUMPEnabled() const
@@ -994,6 +1134,11 @@ bool CConf::getDStarAckReply() const
 unsigned int CConf::getDStarAckTime() const
 {
 	return m_dstarAckTime;
+}
+
+bool CConf::getDStarAckMessage() const
+{
+	return m_dstarAckMessage;
 }
 
 bool CConf::getDStarErrorReply() const
@@ -1111,6 +1256,11 @@ bool CConf::getFusionRemoteGateway() const
 	return m_fusionRemoteGateway;
 }
 
+unsigned int CConf::getFusionTXHang() const
+{
+	return m_fusionTXHang;
+}
+
 bool CConf::getFusionSelfOnly() const
 {
 	return m_fusionSelfOnly;
@@ -1194,6 +1344,16 @@ bool CConf::getNXDNRemoteGateway() const
 unsigned int CConf::getNXDNModeHang() const
 {
 	return m_nxdnModeHang;
+}
+
+bool CConf::getPOCSAGEnabled() const
+{
+	return m_pocsagEnabled;
+}
+
+unsigned int CConf::getPOCSAGFrequency() const
+{
+	return m_pocsagFrequency;
 }
 
 bool CConf::getDStarNetworkEnabled() const
@@ -1351,24 +1511,24 @@ bool CConf::getNXDNNetworkEnabled() const
 	return m_nxdnNetworkEnabled;
 }
 
-std::string CConf::getNXDNNetworkMyAddress() const
+std::string CConf::getNXDNGatewayAddress() const
 {
-	return m_nxdnNetworkMyAddress;
+	return m_nxdnGatewayAddress;
 }
 
-unsigned int CConf::getNXDNNetworkMyPort() const
+unsigned int CConf::getNXDNGatewayPort() const
 {
-	return m_nxdnNetworkMyPort;
+	return m_nxdnGatewayPort;
 }
 
-std::string CConf::getNXDNNetworkGatewayAddress() const
+std::string CConf::getNXDNLocalAddress() const
 {
-	return m_nxdnNetworkGatewayAddress;
+	return m_nxdnLocalAddress;
 }
 
-unsigned int CConf::getNXDNNetworkGatewayPort() const
+unsigned int CConf::getNXDNLocalPort() const
 {
-	return m_nxdnNetworkGatewayPort;
+	return m_nxdnLocalPort;
 }
 
 unsigned int CConf::getNXDNNetworkModeHang() const
@@ -1379,6 +1539,41 @@ unsigned int CConf::getNXDNNetworkModeHang() const
 bool CConf::getNXDNNetworkDebug() const
 {
 	return m_nxdnNetworkDebug;
+}
+
+bool CConf::getPOCSAGNetworkEnabled() const
+{
+	return m_pocsagNetworkEnabled;
+}
+
+std::string CConf::getPOCSAGGatewayAddress() const
+{
+	return m_pocsagGatewayAddress;
+}
+
+unsigned int CConf::getPOCSAGGatewayPort() const
+{
+	return m_pocsagGatewayPort;
+}
+
+std::string CConf::getPOCSAGLocalAddress() const
+{
+	return m_pocsagLocalAddress;
+}
+
+unsigned int CConf::getPOCSAGLocalPort() const
+{
+	return m_pocsagLocalPort;
+}
+
+unsigned int CConf::getPOCSAGNetworkModeHang() const
+{
+	return m_pocsagNetworkModeHang;
+}
+
+bool CConf::getPOCSAGNetworkDebug() const
+{
+	return m_pocsagNetworkDebug;
 }
 
 std::string CConf::getTFTSerialPort() const
@@ -1491,6 +1686,16 @@ bool CConf::getOLEDScroll() const
 	return m_oledScroll;
 }
 
+bool CConf::getOLEDRotate() const
+{
+	return m_oledRotate;
+}
+
+bool CConf::getOLEDCast() const
+{
+	return m_oledCast;
+}
+
 std::string CConf::getLCDprocAddress() const
 {
 	return m_lcdprocAddress;
@@ -1520,3 +1725,34 @@ bool CConf::getLCDprocDimOnIdle() const
 {
 	return m_lcdprocDimOnIdle;
 }
+
+bool CConf::getNextionTempInFahrenheit() const
+{
+	return m_nextionTempInFahrenheit;
+}
+
+bool CConf::getLockFileEnabled() const
+{
+	return m_lockFileEnabled;
+}
+
+std::string CConf::getLockFileName() const
+{
+	return m_lockFileName;
+}
+
+bool CConf::getMobileGPSEnabled() const
+{
+	return m_mobileGPSEnabled;
+}
+
+std::string CConf::getMobileGPSAddress() const
+{
+	return m_mobileGPSAddress;
+}
+
+unsigned int CConf::getMobileGPSPort() const
+{
+	return m_mobileGPSPort;
+}
+

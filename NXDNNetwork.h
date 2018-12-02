@@ -27,18 +27,27 @@
 #include <cstdint>
 #include <string>
 
+enum NXDN_NETWORK_MESSAGE_TYPE {
+	NNMT_VOICE_HEADER,
+	NNMT_VOICE_BODY,
+	NNMT_VOICE_TRAILER,
+	NNMT_DATA_HEADER,
+	NNMT_DATA_BODY,
+	NNMT_DATA_TRAILER
+};
+
 class CNXDNNetwork {
 public:
-	CNXDNNetwork(const std::string& myAddress, unsigned int myPort, const std::string& gatewayAddress, unsigned int gatewayPort, const std::string& callsign, bool debug);
+	CNXDNNetwork(const std::string& localAddress, unsigned int localPort, const std::string& gatewayAddress, unsigned int gatewayPort, bool debug);
 	~CNXDNNetwork();
 
 	bool open();
 
 	void enable(bool enabled);
 
-	bool write(const unsigned char* data, unsigned short src, bool grp, unsigned short dst, bool dat, unsigned char cnt, bool end);
+	bool write(const unsigned char* data, NXDN_NETWORK_MESSAGE_TYPE type);
 
-	unsigned int read(unsigned char* data, unsigned short& src, bool& grp, unsigned short& dst, bool& dat, unsigned char& cnt, bool& end);
+	bool read(unsigned char* data);
 
 	void reset();
 
@@ -47,16 +56,12 @@ public:
 	void clock(unsigned int ms);
 
 private:
-	CUDPSocket     m_socket;
-	in_addr        m_address;
-	unsigned int   m_port;
-	std::string    m_callsign;
-	bool           m_debug;
-	bool           m_enabled;
+	CUDPSocket                 m_socket;
+	in_addr                    m_address;
+	unsigned int               m_port;
+	bool                       m_debug;
+	bool                       m_enabled;
 	CRingBuffer<unsigned char> m_buffer;
-	CTimer         m_pollTimer;
-
-	bool writePoll();
 };
 
 #endif

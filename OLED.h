@@ -20,11 +20,12 @@
 #define	OLED_H
 
 #define OLED_STATUSBAR 0
-#define OLED_LINE1 16
-#define OLED_LINE2 26 
-#define OLED_LINE3 36
-#define OLED_LINE4 46
-#define OLED_LINE5 56
+#define OLED_LINE1 8 //16
+#define OLED_LINE2 18 //26 
+#define OLED_LINE3 28 //36
+#define OLED_LINE4 37 //46
+#define OLED_LINE5 47 //56
+#define OLED_LINE6 57
 
 #include "Display.h"
 #include "Defines.h"
@@ -34,11 +35,13 @@
 #include "ArduiPi_OLED_lib.h"
 #include "Adafruit_GFX.h"
 #include "ArduiPi_OLED.h"
+#include "NetworkInfo.h"
+#include "Modem.h"
 
 class COLED : public CDisplay 
 {
 public:
-  COLED(unsigned char displayType, unsigned char displayBrighness, bool displayInvert, bool displayScroll);
+  COLED(unsigned char displayType, unsigned char displayBrighness, bool displayInvert, bool displayScroll, bool displayRotate, bool slot1Enabled, bool slot2Enabled, CModem* modem);
   virtual ~COLED();
 
   virtual bool open();
@@ -47,7 +50,8 @@ public:
 
   virtual void setErrorInt(const char* text);
   virtual void setLockoutInt();
-
+  virtual void setQuitInt();
+  
   virtual void writeDStarInt(const char* my1, const char* my2, const char* your, const char* type, const char* reflector);
   virtual void clearDStarInt();
 
@@ -63,6 +67,9 @@ public:
   virtual void writeNXDNInt(const char* source, bool group, unsigned int dest, const char* type);
   virtual void clearNXDNInt();
 
+  virtual void writePOCSAGInt(uint32_t ric, const std::string& message);
+  virtual void clearPOCSAGInt();
+
   virtual void writeCWInt();
   virtual void clearCWInt();
 
@@ -76,8 +83,13 @@ private:
   unsigned char m_displayBrightness;
   bool          m_displayInvert;
   bool          m_displayScroll;
+  bool          m_displayRotate;
+  bool          m_slot1Enabled;
+  bool          m_slot2Enabled;
+  CModem*       m_modem;
+  std::string   m_ipaddress;
+  ArduiPi_OLED  m_display;
 
-  ArduiPi_OLED display;
   void OLED_statusbar();
 };
 
